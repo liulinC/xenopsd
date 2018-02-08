@@ -1457,6 +1457,7 @@ module VM = struct
               finally
                 (fun () -> f fd)
                 (fun () ->
+                   debug "XXXX calling fsync on fd of path %s" path;
                    try Xapi_stdext_unix.Unixext.fsync fd;
                    with Unix.Unix_error(Unix.EIO, _, _) ->
                      error "Caught EIO in fsync after suspend; suspend image may be corrupt";
