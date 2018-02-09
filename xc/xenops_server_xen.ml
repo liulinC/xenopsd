@@ -388,8 +388,14 @@ let with_disk ~xc ~xs task disk write f = match disk with
               let is_nbd = String.startswith nbd_prefix block_device in
               let unix_socket_path = block_device |> Astring.String.cuts ~empty:false ~sep:nbd_prefix |> List.hd |> String.split_on_char '|' |> List.hd in
               let nbd_device = if is_nbd then start_nbd_client ~unix_socket_path ~export_name:"qemu_node" else "" in
-              finally (fun () -> f (if is_nbd then nbd_device else block_device))
-                (fun () -> if is_nbd then stop_nbd_client ~nbd_device)
+              finally
+                (fun () -> f (if is_nbd then nbd_device else block_device))
+                (fun () ->
+                   try
+                     if is_nbd then stop_nbd_client ~nbd_device
+                   with e ->
+                     debug "XXXX ignoring exception while disconnecting nbd-client from %s: %s" nbd_device (Printexc.to_string e)
+                )
            )
            (fun () ->
               destroy_vbd_frontend ~xc ~xs task device
