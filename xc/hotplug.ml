@@ -77,18 +77,7 @@ let vif_disconnect_path (x: device) =
 let hotplugged ~xs (x: device) =
   let path = path_written_by_hotplug_scripts x in
   debug "Checking to see whether %s" path;
-  let qdisk = Astring.String.is_infix ~affix:"backend/qdisk/" path in
-  debug "XXXX Hotplug.hotplugged qdisk: %b" qdisk;
-  try
-    ignore(xs.Xs.read path); true
-  with
-    Xs_protocol.Enoent _ -> begin
-      if qdisk then begin
-        debug "XXXX Hotplug.hotplugged : Xenstore key %s not present but assuming qdisk hotplugged" path;
-        true
-      end
-      else false
-    end
+  try ignore(xs.Xs.read path); true with Xs_protocol.Enoent _ -> false
 
 (* The path in xenstore written to by the frontend hotplug scripts *)
 let frontend_status_node (x: device) = 
@@ -126,23 +115,19 @@ let device_is_online ~xs (x: device) =
 let wait_for_plug (task: Xenops_task.task_handle) ~xs (x: device) =
   debug "Hotplug.wait_for_plug: %s" (string_of_device x);
   try
-    let path = path_written_by_hotplug_scripts x in
-    let qdisk = Astring.String.is_infix ~affix:"backend/qdisk/" path in
-    debug "XXXX Hotplug.wait_for_plug qdisk: %b" qdisk;
-    if (not qdisk) then begin
-      Stats.time_this "udev backend add event" 
-        (fun () ->
-           let error_path = error_path_written_by_hotplug_scripts x in
-           let (_: bool) = cancellable_watch (Device x) [
-               Watch.map (fun _ -> ()) (Watch.value_to_appear path);
-               Watch.map (fun _ -> ()) (Watch.value_to_appear error_path);
-             ] [] task ~xs ~timeout:!Xenopsd.hotplug_timeout () in
-           try
-             (* If an error node exists, return the error *)
-             raise (Hotplug_error (xs.Xs.read error_path))
-           with Xs_protocol.Enoent _ -> () (* common case *)
-        )
-    end;
+    Stats.time_this "udev backend add event" 
+      (fun () ->
+         let path = path_written_by_hotplug_scripts x in
+         let error_path = error_path_written_by_hotplug_scripts x in
+         let (_: bool) = cancellable_watch (Device x) [
+             Watch.map (fun _ -> ()) (Watch.value_to_appear path);
+             Watch.map (fun _ -> ()) (Watch.value_to_appear error_path);
+           ] [] task ~xs ~timeout:!Xenopsd.hotplug_timeout () in
+         try
+           (* If an error node exists, return the error *)
+           raise (Hotplug_error (xs.Xs.read error_path))
+         with Xs_protocol.Enoent _ -> () (* common case *)
+      );
     debug "Synchronised ok with hotplug script: %s" (string_of_device x)
   with Watch.Timeout _ ->
     raise (Device_timeout x)
@@ -161,7 +146,7 @@ let wait_for_unplug (task: Xenops_task.task_handle) ~xs (x: device) =
         );
       debug "Synchronised ok with hotplug script: %s" (string_of_device x)
     end else begin
-      try xs.Xs.rm path with _ -> debug "XXXX Hotplug.wait_for_unplug: xenstore key not present"
+      xs.Xs.rm path
     end;
     debug "XXXX wait_for_unplug finished waiting";
   with Watch.Timeout _ ->
